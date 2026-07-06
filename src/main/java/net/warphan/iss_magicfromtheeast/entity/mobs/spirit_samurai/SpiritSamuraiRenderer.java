@@ -1,0 +1,45 @@
+package net.warphan.iss_magicfromtheeast.entity.mobs.spirit_samurai;
+
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import io.redspace.ironsspellbooks.entity.mobs.abstract_spell_casting_mob.AbstractSpellCastingMob;
+import io.redspace.ironsspellbooks.entity.mobs.abstract_spell_casting_mob.AbstractSpellCastingMobRenderer;
+import io.redspace.ironsspellbooks.entity.mobs.keeper.GeoKeeperGhostLayer;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.entity.EntityRendererProvider;
+import net.minecraft.client.renderer.texture.OverlayTexture;
+import software.bernie.geckolib.cache.object.BakedGeoModel;
+
+import javax.annotation.Nullable;
+
+public class SpiritSamuraiRenderer extends AbstractSpellCastingMobRenderer {
+    public SpiritSamuraiRenderer(EntityRendererProvider.Context context) {
+        super(context, new SpiritSamuraiModel());
+        addRenderLayer(new GeoKeeperGhostLayer(this));
+        this.shadowRadius = 0.65f;
+    }
+
+    @Override
+    public void render(AbstractSpellCastingMob entity, float entityYaw, float partialTick, PoseStack poseStack, MultiBufferSource bufferSource, int packedLight) {
+        super.render(entity, entityYaw, partialTick, poseStack, bufferSource, packedLight);
+    }
+
+    // 1.20.1: GeckoLib 4.2 preRender uses float RGBA instead of packed int colour
+    @Override
+    public void preRender(PoseStack poseStack, AbstractSpellCastingMob animatable, BakedGeoModel model, @Nullable MultiBufferSource bufferSource, @Nullable VertexConsumer buffer, boolean isReRender, float partialTick, int packedLight, int packedOverlay, float red, float green, float blue, float alpha) {
+        poseStack.scale(1.3f, 1.3f, 1.3f);
+        super.preRender(poseStack, animatable, model, bufferSource, buffer, isReRender, partialTick, packedLight, packedOverlay, red, green, blue, alpha);
+    }
+
+    //broken glowing thing here
+//    @Override
+//    public RenderType getRenderType(AbstractSpellCastingMob animatable, ResourceLocation texture, @Nullable MultiBufferSource bufferSource, float partialTick) {
+//        return RenderType.entityTranslucent(texture);
+//    }
+
+    // 1.20.1: GeckoLib 4.2 getPackedOverlay has no partialTick parameter
+    @Override
+    public int getPackedOverlay(AbstractSpellCastingMob animatable, float u) {
+        return OverlayTexture.pack(OverlayTexture.u(u), OverlayTexture.v(animatable.deathTime > 0));
+    }
+}

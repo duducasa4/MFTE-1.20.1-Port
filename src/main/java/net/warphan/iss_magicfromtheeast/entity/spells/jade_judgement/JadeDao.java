@@ -1,0 +1,261 @@
+package net.warphan.iss_magicfromtheeast.entity.spells.jade_judgement;
+
+import io.redspace.ironsspellbooks.api.util.Utils;
+import io.redspace.ironsspellbooks.capabilities.magic.MagicManager;
+import io.redspace.ironsspellbooks.damage.DamageSources;
+import io.redspace.ironsspellbooks.entity.spells.AbstractMagicProjectile;
+import io.redspace.ironsspellbooks.particle.BlastwaveParticleOptions;
+import io.redspace.ironsspellbooks.particle.SparkParticleOptions;
+import io.redspace.ironsspellbooks.util.ParticleHelper;
+import net.minecraft.core.particles.DustParticleOptions;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.MoverType;
+import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
+import net.warphan.iss_magicfromtheeast.registries.MFTEEntityRegistries;
+import net.warphan.iss_magicfromtheeast.registries.MFTESchoolRegistries;
+import net.warphan.iss_magicfromtheeast.registries.MFTESoundRegistries;
+import net.warphan.iss_magicfromtheeast.registries.MFTESpellRegistries;
+import net.warphan.iss_magicfromtheeast.util.MFTEParticleHelper;
+import software.bernie.geckolib.animatable.GeoEntity;
+import software.bernie.geckolib.core.animatable.GeoAnimatable;
+import software.bernie.geckolib.core.animatable.instance.AnimatableInstanceCache;
+import software.bernie.geckolib.core.animation.AnimatableManager;
+import software.bernie.geckolib.core.animation.AnimationController;
+import software.bernie.geckolib.core.animation.RawAnimation;
+import software.bernie.geckolib.core.object.PlayState;
+import software.bernie.geckolib.util.GeckoLibUtil;
+
+import javax.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.function.Supplier;
+import java.util.UUID;
+
+public class JadeDao extends AbstractMagicProjectile implements GeoEntity {
+
+    private UUID targetUUID;
+    private Entity cachedTarget;
+    private List<Entity> targets;
+
+    public JadeDao(EntityType<? extends Projectile> pEntityType, Level pLevel) {
+        super(pEntityType, pLevel);
+        targets = new ArrayList<>();
+
+        this.setNoGravity(true);
+    }
+
+    public JadeDao(Level pLevel, LivingEntity owner, LivingEntity target) {
+        this(MFTEEntityRegistries.JADE_DAO.get(), pLevel);
+        this.setOwner(owner);
+        this.setTarget(target);
+    }
+
+    int airTime;
+
+    public void setAirTime(int airTimeInTicks) {
+        airTime = airTimeInTicks;
+    }
+
+    public void setTarget(@Nullable Entity pOwner) {
+        if (pOwner != null) {
+            this.targetUUID = pOwner.getUUID();
+            this.cachedTarget = pOwner;
+        }
+    }
+
+    @Nullable
+    public Entity getTarget() {
+        if (this.cachedTarget != null && !this.cachedTarget.isRemoved()) {
+            return this.cachedTarget;
+        } else if (this.targetUUID != null && this.level instanceof ServerLevel) {
+            this.cachedTarget = ((ServerLevel) this.level).getEntity(this.targetUUID);
+            return this.cachedTarget;
+        } else {
+            return null;
+        }
+    }
+
+    @Override
+    protected void addAdditionalSaveData(CompoundTag tag) {
+        super.addAdditionalSaveData(tag);
+        if (this.targetUUID != null) {
+            tag.putUUID("Target", this.targetUUID);
+        }
+        if (this.airTime > 0) {
+            tag.putInt("airTime", airTime);
+        }
+    }
+
+    protected void readAdditionalSaveData(CompoundTag tag) {
+        super.readAdditionalSaveData(tag);
+        if (tag.hasUUID("Target")) {
+            this.targetUUID = tag.getUUID("Target");
+        }
+        if (tag.contains("airTime")) {
+            this.airTime = tag.getInt("airTime");
+        }
+    }
+
+    @Override
+    public void trailParticles() {
+        for (int i = 0; i < 1; i++) {
+            Vec3 random = new Vec3(
+                    Utils.getRandomScaled(this.getBbWidth() * .5f), 0,
+                    Utils.getRandomScaled(this.getBbWidth() * .5f));
+            level.addParticle(ParticleTypes.GLOW, getX() + random.x, getY(), getZ() + random.z, 0, -.05, 0);
+        }
+    }
+
+    private void doFallingDamage(Entity target) {
+        if (level.isClientSide)
+            return;
+        if (!canHitEntity(target) || targets.contains(target))
+            return;
+        boolean flag = DamageSources.applyDamage(target, getDamage() * 0.25f, MFTESpellRegistries.JADE_JUDGEMENT_SPELL.get().getDamageSource(this, getOwner()));
+        if (flag) {
+            targets.add(target);
+            target.invulnerableTime = 0;
+        }
+    }
+
+    private void doImpactDamage() {
+        float boomRadius = 5f;
+        level.getEntities(this, this.getBoundingBox().inflate(boomRadius)).forEach((entity) -> {
+            if (canHitEntity(entity)) {
+                double distance = entity.distanceToSqr(position());
+                if (distance < boomRadius * boomRadius) {
+                    double p = (1 - Math.pow(Math.sqrt(distance) / (boomRadius), 3));
+                    float damage = (float) (this.damage * p);
+                    DamageSources.applyDamage(entity, damage, MFTESpellRegistries.JADE_JUDGEMENT_SPELL.get().getDamageSource(this, getOwner()));
+                }
+            }
+        });
+    }
+
+    @Override
+    public void tick() {
+        this.firstTick = false;
+        xo = getX();
+        yo = getY();
+        zo = getZ();
+        xOld = getX();
+        yOld = getY();
+        zOld = getZ();
+        yRotO = getYRot();
+        xRotO = getXRot();
+        if (!level.isClientSide) {
+            if (airTime <= 0) {
+                if (onGround()) {
+                    doImpactDamage();
+                    this.playSound(MFTESoundRegistries.JADE_DAO_IMPACT.get(), 8, 7.5f);
+                    impactParticles(getX(), getY(), getZ());
+                    discard();
+                } else {
+                    level.getEntities(this, getBoundingBox().inflate(0.35)).forEach(this::doFallingDamage);
+                }
+            }
+            if (airTime-- > 0) {
+                boolean tooHigh = false;
+                this.setDeltaMovement(getDeltaMovement().multiply(.95f, .75f, .95f));
+                if (getTarget() != null) {
+                    var target = getTarget();
+                    Vec3 diff = target.position().subtract(this.position());
+                    if (diff.horizontalDistanceSqr() > 1) {
+                        this.setDeltaMovement(getDeltaMovement().add(diff.multiply(1, 0, 1).normalize().scale(.025f)));
+                    }
+                    if (this.getY() - target.getY() > 18) {
+                        tooHigh = true;
+                    }
+                } else {
+                    if (airTime % 3 == 0) {
+                        HitResult ground = Utils.raycastForBlock(level, position(), position().subtract(0, 3.5, 0), ClipContext.Fluid.ANY);
+                        if (ground.getType() == HitResult.Type.MISS) {
+                            tooHigh = true;
+                        } else if (Math.abs(position().y - ground.getLocation().y) < 4) {
+                        }
+                    }
+                }
+                if (tooHigh) {
+                    this.setDeltaMovement(getDeltaMovement().add(0, -.005, 0));
+                } else {
+                    this.setDeltaMovement(getDeltaMovement().add(0, .01, 0));
+                }
+                if (airTime == 0) {
+                    this.setDeltaMovement(0, 0.5, 0);
+                }
+            } else {
+                this.setDeltaMovement(0, getDeltaMovement().y - .15, 0);
+            }
+        } else {
+            trailParticles();
+        }
+        move(MoverType.SELF, getDeltaMovement());
+    }
+
+    @Override
+    public void setYRot(float pYRot) {}
+
+    @Override
+    public void setXRot(float pXRot) {}
+
+    @Override
+    public boolean canBeCollidedWith() {
+        return true;
+    }
+
+    @Override
+    protected boolean canHitEntity(Entity pTarget) {
+        return pTarget != getOwner() && super.canHitEntity(pTarget);
+    }
+
+    @Override
+    public void impactParticles(double x, double y, double z) {
+        MagicManager.spawnParticles(level, new BlastwaveParticleOptions(MFTESchoolRegistries.SYMMETRY.get().getTargetingColor(), 5f), x, y + .165f, z, 1, 0, 0, 0, 0, true);
+        MagicManager.spawnParticles(level, new SparkParticleOptions(MFTESchoolRegistries.SYMMETRY.get().getTargetingColor()), x, y + 0.1, z, 30, .08, 1.0, .08, 0.3, false);
+        MagicManager.spawnParticles(level, new DustParticleOptions(MFTESchoolRegistries.SYMMETRY.get().getTargetingColor(), 3f), x, y + 0.1, z, 60, 2.0, 1.0, 2.0, 0.5, false);
+        MagicManager.spawnParticles(level, ParticleTypes.GLOW, x, y + 0.1, z, 40, 1.5, .3, 1.5, 0.6, false);
+        MagicManager.spawnParticles(level, MFTEParticleHelper.JADE_SHATTER, x, y + 0.1, z, 25, 1.0, .1, 1.0, 0.4, false);
+    }
+
+    @Override
+    public float getSpeed() {
+        return 0;
+    }
+
+    @Override
+    public Optional<Supplier<SoundEvent>> getImpactSound() {
+        return Optional.empty();
+    }
+
+    //ANIMATION
+    private final RawAnimation prepare = RawAnimation.begin().thenPlay("prepare");
+
+    private PlayState predicate(software.bernie.geckolib.core.animation.AnimationState state) {
+        state.getController().setAnimation(prepare);
+        return PlayState.CONTINUE;
+    }
+
+    @Override
+    public void registerControllers(AnimatableManager.ControllerRegistrar controllerRegistrar) {
+        controllerRegistrar.add(new AnimationController<GeoAnimatable>(this, "controller", 0, this::predicate));
+    }
+
+    @Override
+    public AnimatableInstanceCache getAnimatableInstanceCache() {
+        return this.cache;
+    }
+
+    private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
+}
