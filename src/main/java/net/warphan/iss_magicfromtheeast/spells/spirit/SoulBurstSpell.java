@@ -26,7 +26,6 @@ import net.warphan.iss_magicfromtheeast.registries.MFTESchoolRegistries;
 import java.util.List;
 import java.util.Optional;
 
-@AutoSpellConfig
 public class SoulBurstSpell extends AbstractSpell {
     private final ResourceLocation spellID = new ResourceLocation(ISS_MagicFromTheEast.MOD_ID, "soul_burst");
 
